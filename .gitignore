@@ -1,0 +1,6 @@
+node_modules/
+.env
+temp_exports/
+*.log
+.pm2/
+package-lock.json

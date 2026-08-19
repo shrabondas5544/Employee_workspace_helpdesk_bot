@@ -1,0 +1,29 @@
+{
+  "name": "telegram-employee-feedbackbot",
+  "version": "1.0.0",
+  "description": "Workplace Helpdesk Telegram Bot with Scheduled Daily Broadcasts & Excel Export",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "node --check index.js"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "telegraf",
+    "helpdesk",
+    "ticketing",
+    "cron",
+    "exceljs"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "exceljs": "^4.4.0",
+    "mysql2": "^3.9.7",
+    "node-cron": "^3.0.3",
+    "telegraf": "^4.16.3"
+  }
+}
