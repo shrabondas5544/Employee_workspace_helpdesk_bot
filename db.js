@@ -52,6 +52,18 @@ async function initDB() {
       // Column may already exist
     }
 
+    try {
+      await pool.query("ALTER TABLE tickets MODIFY COLUMN status ENUM('Pending', 'In Progress', 'Fixed', 'Rejected') DEFAULT 'Pending';");
+    } catch (e) {
+      // Status enum might already be modified
+    }
+
+    try {
+      await pool.query("ALTER TABLE tickets ADD COLUMN resolved_at TIMESTAMP NULL DEFAULT NULL;");
+    } catch (e) {
+      // Column resolved_at might already exist
+    }
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS tickets (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -61,8 +73,9 @@ async function initDB() {
         description TEXT NOT NULL,
         photo_file_id VARCHAR(255) DEFAULT NULL,
         telegram_user_id BIGINT NOT NULL,
-        status ENUM('Pending', 'In Progress', 'Fixed') DEFAULT 'Pending',
+        status ENUM('Pending', 'In Progress', 'Fixed', 'Rejected') DEFAULT 'Pending',
         hr_message_id BIGINT DEFAULT NULL,
+        resolved_at TIMESTAMP NULL DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (telegram_user_id) REFERENCES users(telegram_id) ON DELETE CASCADE

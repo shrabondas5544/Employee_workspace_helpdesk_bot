@@ -21,8 +21,9 @@ CREATE TABLE IF NOT EXISTS tickets (
     description TEXT NOT NULL,
     photo_file_id VARCHAR(255) DEFAULT NULL,
     telegram_user_id BIGINT NOT NULL,
-    status ENUM('Pending', 'In Progress', 'Fixed') DEFAULT 'Pending',
+    status ENUM('Pending', 'In Progress', 'Fixed', 'Rejected') DEFAULT 'Pending',
     hr_message_id BIGINT DEFAULT NULL,
+    resolved_at TIMESTAMP NULL DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     FOREIGN KEY (telegram_user_id) REFERENCES users(telegram_id) ON DELETE CASCADE

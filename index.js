@@ -138,7 +138,10 @@ function buildAdminKeyboard(ticketId) {
       Markup.button.callback('⏳ In Progress', `status_inprogress_${ticketId}`),
       Markup.button.callback('✅ Mark Fixed', `status_fixed_${ticketId}`),
     ],
-    [Markup.button.callback('📊 Download Excel Report', 'export_excel')],
+    [
+      Markup.button.callback('❌ Reject', `status_rejected_${ticketId}`),
+      Markup.button.callback('📊 Download Excel Report', 'export_excel'),
+    ],
   ]);
 }
 
@@ -149,6 +152,8 @@ function formatTicketGroupMessage(ticket, reporterUser, adminUser = null) {
     statusEmoji = '⏳ In Progress';
   } else if (ticket.status === 'Fixed') {
     statusEmoji = '✅ Fixed';
+  } else if (ticket.status === 'Rejected') {
+    statusEmoji = '❌ Rejected';
   }
 
   const reporterMention = getUserMention(
@@ -179,7 +184,20 @@ function formatTicketGroupMessage(ticket, reporterUser, adminUser = null) {
     text += `👤 *Updated By:* ${adminMention}\n`;
   }
 
-  text += `\n📅 *Reported At:* ${new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })} (BD Time)`;
+  const reportDateStr = ticket.created_at
+    ? new Date(ticket.created_at).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' })
+    : new Date().toLocaleString('en-US', { timeZone: 'Asia/Dhaka' });
+
+  text += `\n📅 *Reported At:* ${reportDateStr} (BD Time)`;
+
+  if (ticket.resolved_at) {
+    const resolvedDateStr = new Date(ticket.resolved_at).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' });
+    if (ticket.status === 'Fixed') {
+      text += `\n✅ *Fixed At:* ${resolvedDateStr} (BD Time)`;
+    } else if (ticket.status === 'Rejected') {
+      text += `\n❌ *Rejected At:* ${resolvedDateStr} (BD Time)`;
+    }
+  }
 
   return text;
 }
@@ -455,8 +473,8 @@ bot.action(/^status_inprogress_(\d+)$/, async (ctx) => {
   };
 
   try {
-    // 1. Update status in database
-    await pool.query("UPDATE tickets SET status = 'In Progress' WHERE id = ?", [ticketId]);
+    // 1. Update status and clear resolved_at in database
+    await pool.query("UPDATE tickets SET status = 'In Progress', resolved_at = NULL WHERE id = ?", [ticketId]);
 
     // 2. Fetch updated ticket details & reporter user
     const [rows] = await pool.query(
@@ -514,8 +532,8 @@ bot.action(/^status_fixed_(\d+)$/, async (ctx) => {
   };
 
   try {
-    // 1. Update status in database
-    await pool.query("UPDATE tickets SET status = 'Fixed' WHERE id = ?", [ticketId]);
+    // 1. Update status and set resolved_at in database
+    await pool.query("UPDATE tickets SET status = 'Fixed', resolved_at = CURRENT_TIMESTAMP WHERE id = ?", [ticketId]);
 
     // 2. Fetch updated ticket details & reporter user
     const [rows] = await pool.query(
@@ -570,6 +588,76 @@ bot.action(/^status_fixed_(\d+)$/, async (ctx) => {
   } catch (err) {
     console.error('Error marking ticket fixed:', err);
     await ctx.answerCbQuery('❌ Failed to update status.');
+  }
+});
+
+// Action: Reject Button Clicked
+bot.action(/^status_rejected_(\d+)$/, async (ctx) => {
+  const ticketId = parseInt(ctx.match[1], 10);
+  const adminUser = {
+    telegram_id: ctx.from.id,
+    first_name: ctx.from.first_name,
+    last_name: ctx.from.last_name,
+    username: ctx.from.username,
+  };
+
+  try {
+    // 1. Update status and set resolved_at in database
+    await pool.query("UPDATE tickets SET status = 'Rejected', resolved_at = CURRENT_TIMESTAMP WHERE id = ?", [ticketId]);
+
+    // 2. Fetch updated ticket details & reporter user
+    const [rows] = await pool.query(
+      `SELECT t.*, u.username, u.first_name, u.last_name, u.phone_number 
+       FROM tickets t 
+       LEFT JOIN users u ON t.telegram_user_id = u.telegram_id 
+       WHERE t.id = ?`,
+      [ticketId]
+    );
+
+    if (rows.length === 0) {
+      return ctx.answerCbQuery('Ticket not found!');
+    }
+
+    const ticket = rows[0];
+    const reporterUser = {
+      telegram_id: ticket.telegram_user_id,
+      first_name: ticket.first_name,
+      last_name: ticket.last_name,
+      username: ticket.username,
+      phone_number: ticket.phone_number,
+    };
+
+    const updatedText = formatTicketGroupMessage(ticket, reporterUser, adminUser);
+    const adminKeyboard = buildAdminKeyboard(ticketId);
+
+    // Edit group message caption or text
+    if (ctx.callbackQuery.message.photo) {
+      await ctx.editMessageCaption(updatedText, {
+        parse_mode: 'Markdown',
+        ...adminKeyboard,
+      });
+    } else {
+      await ctx.editMessageText(updatedText, {
+        parse_mode: 'Markdown',
+        ...adminKeyboard,
+      });
+    }
+
+    await ctx.answerCbQuery('❌ Ticket marked as Rejected.');
+
+    // 3. Private Notification to Employee
+    try {
+      await bot.telegram.sendMessage(
+        ticket.telegram_user_id,
+        `❌ Your reported issue (*${ticket.ticket_code}*) has been rejected by the Admin team.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch (notifyErr) {
+      console.error(`Could not send private notification to user ${ticket.telegram_user_id}:`, notifyErr.message);
+    }
+  } catch (err) {
+    console.error('Error rejecting ticket:', err);
+    await ctx.answerCbQuery('❌ Failed to reject ticket.');
   }
 });
 

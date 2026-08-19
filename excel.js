@@ -39,6 +39,7 @@ async function generateExcelReport(pool) {
     { header: 'User ID', key: 'telegram_user_id', width: 18 },
     { header: 'Status', key: 'status', width: 15 },
     { header: 'Created Date', key: 'created_at', width: 22 },
+    { header: 'Resolved/Rejected Date', key: 'resolved_at', width: 22 },
   ];
 
   // Style header row 1
@@ -60,7 +61,8 @@ async function generateExcelReport(pool) {
        u.phone_number,
        t.telegram_user_id, 
        t.status, 
-       t.created_at 
+       t.created_at,
+       t.resolved_at
      FROM tickets t 
      LEFT JOIN users u ON t.telegram_user_id = u.telegram_id 
      ORDER BY t.created_at DESC`
@@ -77,6 +79,7 @@ async function generateExcelReport(pool) {
       telegram_user_id: String(t.telegram_user_id),
       status: t.status,
       created_at: t.created_at ? new Date(t.created_at).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }) : '',
+      resolved_at: t.resolved_at ? new Date(t.resolved_at).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }) : 'N/A',
     });
   });
 
