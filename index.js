@@ -733,11 +733,11 @@ cron.schedule(
   }
 );
 
-// Broadcast 2: 6:00 PM BD Time Daily Evening Survey
+// Broadcast 2: 3:50 PM BD Time Daily Evening Survey (Updated for testing)
 cron.schedule(
-  '0 18 * * *',
+  '50 15 * * *',
   async () => {
-    console.log('⏰ Executing 6:00 PM BD Daily Evening Survey...');
+    console.log('⏰ Executing 3:50 PM BD Daily Evening Survey...');
     try {
       const [users] = await pool.query('SELECT telegram_id FROM users');
       const surveyMsg = '🌇 *Evening Workplace Feedback*\n\nHow satisfied were you with your workplace environment today? Please select a rating:';

@@ -22,7 +22,7 @@ A complete Node.js backend service powered by `telegraf` (v4+), `mysql2`, `node-
 
 3. **Scheduled Daily Cron Tasks (Timezone: `Asia/Dhaka`, GMT+6)**:
    - **09:30 AM BD Time Broadcast**: Sends morning motivation & issue reporting reminder to all registered users.
-   - **06:00 PM BD Time Daily Survey**: Interactive 1 to 5 Star rating survey (`⭐ 1` to `⭐ 5`) with optional text feedback/remarks prompt.
+    - **03:50 PM BD Time Daily Survey**: Interactive 1 to 5 Star rating survey (`⭐ 1` to `⭐ 5`) with optional text feedback/remarks prompt.
 
 4. **Dual-Sheet Excel Report Export**:
    - Triggered via group command `/excel` or group inline button `[ 📊 Download Excel Report ]`.
@@ -53,12 +53,12 @@ npm install
 Create or edit the `.env` file in the project root:
 
 ```env
-BOT_TOKEN=8622576594:AAHkZZB6kB959lbCA5XTMaARwywJHDKMj6o
-HR_GROUP_CHAT_ID=-5581410948
+BOT_TOKEN=your_telegram_bot_token_here
+HR_GROUP_CHAT_ID=group_chat_id
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=your_mysql_password
-DB_NAME=company_helpdesk
+DB_NAME=database name
 DB_PORT=3306
 ```
 
