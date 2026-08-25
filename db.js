@@ -64,6 +64,12 @@ async function initDB() {
       // Column resolved_at might already exist
     }
 
+    try {
+      await pool.query("ALTER TABLE tickets ADD COLUMN rejection_reason TEXT DEFAULT NULL;");
+    } catch (e) {
+      // Column rejection_reason might already exist
+    }
+
     await pool.query(`
       CREATE TABLE IF NOT EXISTS tickets (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -76,6 +82,7 @@ async function initDB() {
         status ENUM('Pending', 'In Progress', 'Fixed', 'Rejected') DEFAULT 'Pending',
         hr_message_id BIGINT DEFAULT NULL,
         resolved_at TIMESTAMP NULL DEFAULT NULL,
+        rejection_reason TEXT DEFAULT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (telegram_user_id) REFERENCES users(telegram_id) ON DELETE CASCADE

@@ -196,6 +196,9 @@ function formatTicketGroupMessage(ticket, reporterUser, adminUser = null) {
       text += `\n✅ *Fixed At:* ${resolvedDateStr} (BD Time)`;
     } else if (ticket.status === 'Rejected') {
       text += `\n❌ *Rejected At:* ${resolvedDateStr} (BD Time)`;
+      if (ticket.rejection_reason) {
+        text += `\n📝 *Rejection Reason:* ${ticket.rejection_reason}`;
+      }
     }
   }
 
@@ -273,7 +276,7 @@ bot.on('contact', async (ctx) => {
 
 // Department Selection Callback Handler
 bot.action(/^dept_(\d+)$/, async (ctx) => {
-  await ctx.answerCbQuery();
+  await ctx.answerCbQuery().catch(() => {});
   const deptIndex = parseInt(ctx.match[1], 10);
   const selectedDept = DEPARTMENTS[deptIndex];
 
@@ -308,7 +311,7 @@ bot.action(/^dept_(\d+)$/, async (ctx) => {
 
 // Issue Type Selection Callback Handler
 bot.action(/^issue_(\d+)$/, async (ctx) => {
-  await ctx.answerCbQuery();
+  await ctx.answerCbQuery().catch(() => {});
   const issueIndex = parseInt(ctx.match[1], 10);
   const selectedIssue = ISSUE_TYPES[issueIndex];
 
@@ -335,6 +338,104 @@ bot.action(/^issue_(\d+)$/, async (ctx) => {
 bot.on(['text', 'photo'], async (ctx, next) => {
   const userId = ctx.from.id;
   const session = userSessions[userId];
+
+  // Case C: Admin is replying with rejection reason
+  if (session && session.step === 'AWAITING_REJECTION_REASON') {
+    const ticketId = session.ticketId;
+    const groupChatId = session.groupChatId;
+    const originalMsgId = session.originalMsgId;
+    const originalPhoto = session.originalPhoto;
+    const adminUser = session.adminUser;
+
+    delete userSessions[userId]; // Clear session
+
+    let rejectionReason = ctx.message.text ? ctx.message.text.trim() : '';
+
+    if (!rejectionReason) {
+      return ctx.reply('Please reply with text for the rejection reason.');
+    }
+
+    if (rejectionReason.toLowerCase() === 'cancel') {
+      try {
+        await ctx.reply('❌ Ticket rejection cancelled.');
+      } catch (err) {
+        console.error('Failed to notify rejection cancellation:', err);
+      }
+      return;
+    }
+
+    try {
+      // 1. Update status, set resolved_at, and set rejection_reason in database
+      await pool.query(
+        "UPDATE tickets SET status = 'Rejected', resolved_at = CURRENT_TIMESTAMP, rejection_reason = ? WHERE id = ?",
+        [rejectionReason, ticketId]
+      );
+
+      // 2. Fetch updated ticket details & reporter user
+      const [rows] = await pool.query(
+        `SELECT t.*, u.username, u.first_name, u.last_name, u.phone_number 
+         FROM tickets t 
+         LEFT JOIN users u ON t.telegram_user_id = u.telegram_id 
+         WHERE t.id = ?`,
+        [ticketId]
+      );
+
+      if (rows.length === 0) {
+        return ctx.reply('Ticket not found in database.');
+      }
+
+      const ticket = rows[0];
+      const reporterUser = {
+        telegram_id: ticket.telegram_user_id,
+        first_name: ticket.first_name,
+        last_name: ticket.last_name,
+        username: ticket.username,
+        phone_number: ticket.phone_number,
+      };
+
+      const updatedText = formatTicketGroupMessage(ticket, reporterUser, adminUser);
+      const adminKeyboard = buildAdminKeyboard(ticketId);
+
+      // Edit group message caption or text
+      try {
+        if (originalPhoto) {
+          await ctx.telegram.editMessageCaption(groupChatId, originalMsgId, undefined, updatedText, {
+            parse_mode: 'Markdown',
+            ...adminKeyboard,
+          });
+        } else {
+          await ctx.telegram.editMessageText(groupChatId, originalMsgId, undefined, updatedText, {
+            parse_mode: 'Markdown',
+            ...adminKeyboard,
+          });
+        }
+      } catch (editErr) {
+        console.error('Failed to update group ticket message:', editErr.message);
+      }
+
+      // Notify the admin in group that it was successfully rejected
+      try {
+        await ctx.reply(`❌ Ticket \`${ticket.ticket_code}\` has been rejected.`);
+      } catch (replyErr) {
+        console.error('Failed to reply in group:', replyErr.message);
+      }
+
+      // 3. Private Notification to Employee
+      try {
+        await bot.telegram.sendMessage(
+          ticket.telegram_user_id,
+          `❌ *Your reported issue (${ticket.ticket_code}) has been rejected by the Admin team.*\n\n📝 *Reason:* ${rejectionReason}`,
+          { parse_mode: 'Markdown' }
+        );
+      } catch (notifyErr) {
+        console.error(`Could not send private notification to user ${ticket.telegram_user_id}:`, notifyErr.message);
+      }
+    } catch (err) {
+      console.error('Error rejecting ticket with reason:', err);
+      await ctx.reply('❌ Failed to update ticket rejection status due to a database error.');
+    }
+    return;
+  }
 
   // Case A: User is submitting ticket description & photo
   if (session && session.step === 'AWAITING_DESCRIPTION') {
@@ -486,7 +587,7 @@ bot.action(/^status_inprogress_(\d+)$/, async (ctx) => {
     );
 
     if (rows.length === 0) {
-      return ctx.answerCbQuery('Ticket not found!');
+      return ctx.answerCbQuery('Ticket not found!').catch(() => {});
     }
 
     const ticket = rows[0];
@@ -514,10 +615,10 @@ bot.action(/^status_inprogress_(\d+)$/, async (ctx) => {
       });
     }
 
-    await ctx.answerCbQuery('⏳ Ticket status updated to In Progress.');
+    await ctx.answerCbQuery('⏳ Ticket status updated to In Progress.').catch(() => {});
   } catch (err) {
     console.error('Error setting ticket in progress:', err);
-    await ctx.answerCbQuery('❌ Failed to update status.');
+    await ctx.answerCbQuery('❌ Failed to update status.').catch(() => {});
   }
 });
 
@@ -545,7 +646,7 @@ bot.action(/^status_fixed_(\d+)$/, async (ctx) => {
     );
 
     if (rows.length === 0) {
-      return ctx.answerCbQuery('Ticket not found!');
+      return ctx.answerCbQuery('Ticket not found!').catch(() => {});
     }
 
     const ticket = rows[0];
@@ -573,7 +674,7 @@ bot.action(/^status_fixed_(\d+)$/, async (ctx) => {
       });
     }
 
-    await ctx.answerCbQuery('✅ Ticket marked as Fixed!');
+    await ctx.answerCbQuery('✅ Ticket marked as Fixed!').catch(() => {});
 
     // 3. Private Notification to Employee
     try {
@@ -587,77 +688,64 @@ bot.action(/^status_fixed_(\d+)$/, async (ctx) => {
     }
   } catch (err) {
     console.error('Error marking ticket fixed:', err);
-    await ctx.answerCbQuery('❌ Failed to update status.');
+    await ctx.answerCbQuery('❌ Failed to update status.').catch(() => {});
   }
 });
 
 // Action: Reject Button Clicked
 bot.action(/^status_rejected_(\d+)$/, async (ctx) => {
   const ticketId = parseInt(ctx.match[1], 10);
-  const adminUser = {
-    telegram_id: ctx.from.id,
-    first_name: ctx.from.first_name,
-    last_name: ctx.from.last_name,
-    username: ctx.from.username,
-  };
+  const adminUserId = ctx.from.id;
 
   try {
-    // 1. Update status and set resolved_at in database
-    await pool.query("UPDATE tickets SET status = 'Rejected', resolved_at = CURRENT_TIMESTAMP WHERE id = ?", [ticketId]);
-
-    // 2. Fetch updated ticket details & reporter user
-    const [rows] = await pool.query(
-      `SELECT t.*, u.username, u.first_name, u.last_name, u.phone_number 
-       FROM tickets t 
-       LEFT JOIN users u ON t.telegram_user_id = u.telegram_id 
-       WHERE t.id = ?`,
-      [ticketId]
-    );
+    // 1. Fetch ticket details to ensure it exists and get ticket_code
+    const [rows] = await pool.query('SELECT ticket_code FROM tickets WHERE id = ?', [ticketId]);
 
     if (rows.length === 0) {
-      return ctx.answerCbQuery('Ticket not found!');
+      return ctx.answerCbQuery('Ticket not found!').catch(() => {});
     }
 
-    const ticket = rows[0];
-    const reporterUser = {
-      telegram_id: ticket.telegram_user_id,
-      first_name: ticket.first_name,
-      last_name: ticket.last_name,
-      username: ticket.username,
-      phone_number: ticket.phone_number,
+    const ticketCode = rows[0].ticket_code;
+
+    // 2. Set admin session state
+    userSessions[adminUserId] = {
+      step: 'AWAITING_REJECTION_REASON',
+      ticketId: ticketId,
+      groupChatId: ctx.chat.id,
+      originalMsgId: ctx.callbackQuery.message.message_id,
+      originalPhoto: ctx.callbackQuery.message.photo ? true : false,
+      adminUser: {
+        telegram_id: ctx.from.id,
+        first_name: ctx.from.first_name,
+        last_name: ctx.from.last_name,
+        username: ctx.from.username,
+      }
     };
 
-    const updatedText = formatTicketGroupMessage(ticket, reporterUser, adminUser);
-    const adminKeyboard = buildAdminKeyboard(ticketId);
+    // 3. Prompt the admin in the group
+    const adminMention = getUserMention(
+      ctx.from.id,
+      ctx.from.first_name,
+      ctx.from.last_name,
+      ctx.from.username
+    );
 
-    // Edit group message caption or text
-    if (ctx.callbackQuery.message.photo) {
-      await ctx.editMessageCaption(updatedText, {
+    await ctx.reply(
+      `💬 ${adminMention}, please reply to this message with the reason for rejecting ticket \`${ticketCode}\` (or type \`Cancel\` to abort):`,
+      {
         parse_mode: 'Markdown',
-        ...adminKeyboard,
-      });
-    } else {
-      await ctx.editMessageText(updatedText, {
-        parse_mode: 'Markdown',
-        ...adminKeyboard,
-      });
-    }
+        reply_to_message_id: ctx.callbackQuery.message.message_id,
+        reply_markup: {
+          force_reply: true,
+          selective: true,
+        },
+      }
+    );
 
-    await ctx.answerCbQuery('❌ Ticket marked as Rejected.');
-
-    // 3. Private Notification to Employee
-    try {
-      await bot.telegram.sendMessage(
-        ticket.telegram_user_id,
-        `❌ Your reported issue (*${ticket.ticket_code}*) has been rejected by the Admin team.`,
-        { parse_mode: 'Markdown' }
-      );
-    } catch (notifyErr) {
-      console.error(`Could not send private notification to user ${ticket.telegram_user_id}:`, notifyErr.message);
-    }
+    await ctx.answerCbQuery('Please provide a rejection reason.').catch(() => {});
   } catch (err) {
-    console.error('Error rejecting ticket:', err);
-    await ctx.answerCbQuery('❌ Failed to reject ticket.');
+    console.error('Error initiating ticket rejection:', err);
+    await ctx.answerCbQuery('❌ Failed to initiate rejection.').catch(() => {});
   }
 });
 
@@ -698,7 +786,7 @@ bot.command('excel', async (ctx) => {
 });
 
 bot.action('export_excel', async (ctx) => {
-  await ctx.answerCbQuery();
+  await ctx.answerCbQuery().catch(() => {});
   await handleExcelExport(ctx);
 });
 
@@ -773,7 +861,7 @@ cron.schedule(
 
 // Rating Button Callback Handler (1 to 5 Stars)
 bot.action(/^rate_([1-5])$/, async (ctx) => {
-  await ctx.answerCbQuery();
+  await ctx.answerCbQuery().catch(() => {});
   const score = parseInt(ctx.match[1], 10);
   const userId = ctx.from.id;
   const todayDate = getDhakaDateString();
@@ -808,6 +896,9 @@ bot.action(/^rate_([1-5])$/, async (ctx) => {
 // Server Startup & Graceful Shutdown
 // ----------------------------------------------------
 bot.catch((err, ctx) => {
+  if (err?.response?.description?.includes('query is too old')) {
+    return;
+  }
   console.error(`Telegraf error for update type "${ctx.updateType}":`, err);
 });
 

@@ -40,6 +40,7 @@ async function generateExcelReport(pool) {
     { header: 'Status', key: 'status', width: 15 },
     { header: 'Created Date', key: 'created_at', width: 22 },
     { header: 'Resolved/Rejected Date', key: 'resolved_at', width: 22 },
+    { header: 'Rejection Reason', key: 'rejection_reason', width: 30 },
   ];
 
   // Style header row 1
@@ -62,11 +63,12 @@ async function generateExcelReport(pool) {
        t.telegram_user_id, 
        t.status, 
        t.created_at,
-       t.resolved_at
+       t.resolved_at,
+       t.rejection_reason
      FROM tickets t 
      LEFT JOIN users u ON t.telegram_user_id = u.telegram_id 
      ORDER BY t.created_at DESC`
-  );
+   );
 
   tickets.forEach((t) => {
     sheet1.addRow({
@@ -80,6 +82,7 @@ async function generateExcelReport(pool) {
       status: t.status,
       created_at: t.created_at ? new Date(t.created_at).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }) : '',
       resolved_at: t.resolved_at ? new Date(t.resolved_at).toLocaleString('en-US', { timeZone: 'Asia/Dhaka' }) : 'N/A',
+      rejection_reason: t.rejection_reason || 'N/A',
     });
   });
 
