@@ -145,6 +145,68 @@ function buildAdminKeyboard(ticketId) {
   ]);
 }
 
+// Helper: Retrieve and re-send ticket card by ticket code
+async function sendTicketCard(ctx, ticketCode) {
+  try {
+    // 1. Fetch ticket details & reporter user
+    const [rows] = await pool.query(
+      `SELECT t.*, u.username, u.first_name, u.last_name, u.phone_number 
+       FROM tickets t 
+       LEFT JOIN users u ON t.telegram_user_id = u.telegram_id 
+       WHERE t.ticket_code = ?`,
+      [ticketCode]
+    );
+
+    if (rows.length === 0) {
+      return ctx.reply(`❌ Ticket \`${ticketCode}\` not found in database.`, { parse_mode: 'Markdown' });
+    }
+
+    const ticket = rows[0];
+    const reporterUser = {
+      telegram_id: ticket.telegram_user_id,
+      first_name: ticket.first_name,
+      last_name: ticket.last_name,
+      username: ticket.username,
+      phone_number: ticket.phone_number,
+    };
+
+    let adminUser = null;
+    if (ticket.status !== 'Pending') {
+      adminUser = {
+        first_name: 'HR Admin',
+      };
+    }
+
+    const cardText = formatTicketGroupMessage(ticket, reporterUser, adminUser);
+    const adminKeyboard = buildAdminKeyboard(ticket.id);
+
+    let sentMessage;
+    if (ticket.photo_file_id) {
+      sentMessage = await ctx.replyWithPhoto(ticket.photo_file_id, {
+        caption: cardText,
+        parse_mode: 'Markdown',
+        ...adminKeyboard,
+      });
+    } else {
+      sentMessage = await ctx.reply(cardText, {
+        parse_mode: 'Markdown',
+        ...adminKeyboard,
+      });
+    }
+
+    // Update the message_id in tickets table so if the admin clicks buttons on this new message, it edits the new message!
+    if (sentMessage && sentMessage.message_id && String(ctx.chat.id) === String(HR_GROUP_CHAT_ID)) {
+      await pool.query('UPDATE tickets SET hr_message_id = ? WHERE id = ?', [
+        sentMessage.message_id,
+        ticket.id,
+      ]);
+    }
+  } catch (err) {
+    console.error('Error sending ticket card:', err);
+    await ctx.reply('❌ Failed to retrieve ticket card.');
+  }
+}
+
 // Helper: Format Ticket Message Text for Group
 function formatTicketGroupMessage(ticket, reporterUser, adminUser = null) {
   let statusEmoji = '🔴 Pending';
@@ -238,14 +300,32 @@ bot.start(async (ctx) => {
   const userId = ctx.from.id;
   delete userSessions[userId];
 
-  // Directly show Department selection menu
+  // Check if phone number is registered
+  const user = await getUserFromDB(userId);
+  if (!user || !user.phone_number) {
+    return ctx.reply(
+      `📱 *Phone Number Required*\n\n` +
+      `Welcome to the *Workplace Helpdesk Bot*!\n\n` +
+      `To help HR & Admin contact you regarding your reported tickets, please share your phone number:\n\n` +
+      `👇 *Click the "📱 Share Phone Number" button below:*`,
+      {
+        parse_mode: 'Markdown',
+        ...Markup.keyboard([[Markup.button.contactRequest('📱 Share Phone Number')]])
+          .resize()
+          .oneTime(),
+      }
+    );
+  }
+
+  // Directly show Department selection menu if phone number exists
   return sendDepartmentMenu(ctx);
 });
 
 // /phone Command Handler (Optional phone update)
 bot.command('phone', async (ctx) => {
   return ctx.reply(
-    `📱 To help HR & Admin contact you regarding tickets, click the button below to share your phone number:`,
+    `📱 To help HR & Admin contact you regarding tickets, please share your phone number:\n\n` +
+    `👇 *Click the "📱 Share Phone Number" button below:*`,
     {
       parse_mode: 'Markdown',
       ...Markup.keyboard([[Markup.button.contactRequest('📱 Share Phone Number')]])
@@ -267,10 +347,12 @@ bot.on('contact', async (ctx) => {
 
     await registerOrUpdateUser(ctx, rawPhone);
 
-    return ctx.reply(`✅ Thank you! Phone number *${rawPhone}* saved successfully.`, {
+    await ctx.reply(`✅ Thank you! Phone number *${rawPhone}* saved successfully.`, {
       parse_mode: 'Markdown',
       ...Markup.removeKeyboard(),
     });
+
+    return sendDepartmentMenu(ctx);
   }
 });
 
@@ -336,6 +418,16 @@ bot.action(/^issue_(\d+)$/, async (ctx) => {
 
 // Text & Photo Message Handler (Ticket Details or Survey Remarks)
 bot.on(['text', 'photo'], async (ctx, next) => {
+  // Handle Ticket Code lookup in Admin Group
+  if (ctx.message.text && String(ctx.chat.id) === String(HR_GROUP_CHAT_ID)) {
+    const ticketCodeMatch = ctx.message.text.match(/\b(TK-\d{5})\b/i);
+    if (ticketCodeMatch) {
+      const ticketCode = ticketCodeMatch[1].toUpperCase();
+      await sendTicketCard(ctx, ticketCode);
+      return;
+    }
+  }
+
   const userId = ctx.from.id;
   const session = userSessions[userId];
 
@@ -788,6 +880,21 @@ bot.command('excel', async (ctx) => {
 bot.action('export_excel', async (ctx) => {
   await ctx.answerCbQuery().catch(() => {});
   await handleExcelExport(ctx);
+});
+
+// Bind Ticket lookup command
+bot.command(['ticket', 'tk'], async (ctx) => {
+  if (String(ctx.chat.id) !== String(HR_GROUP_CHAT_ID)) {
+    return ctx.reply('❌ This command can only be used within the HR Admin group chat.');
+  }
+
+  const ticketCodeMatch = ctx.message.text.match(/\b(TK-\d{5})\b/i);
+  if (!ticketCodeMatch) {
+    return ctx.reply('⚠️ Please provide a valid ticket code. Example: `/ticket TK-34977`', { parse_mode: 'Markdown' });
+  }
+
+  const ticketCode = ticketCodeMatch[1].toUpperCase();
+  await sendTicketCard(ctx, ticketCode);
 });
 
 // ----------------------------------------------------
